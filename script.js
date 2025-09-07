@@ -1,8 +1,8 @@
 // Configuration
 const CONFIG = {
     // Replace this with your actual ActivePieces webhook URL
-    WEBHOOK_URL: 'https://your-activepieces-webhook-url.com/webhook',
-    MAX_MESSAGE_LENGTH: 500,
+    WEBHOOK_URL: 'https://cloud.activepieces.com/api/v1/webhooks/Mv38eBdOp6AP7ctrdOGOP',
+    MAX_MESSAGE_LENGTH: 5000,
     TYPING_DELAY: 100,
     API_TIMEOUT: 30000 // 30 seconds
 };
@@ -382,3 +382,4 @@ if ('serviceWorker' in navigator) {
         //     .catch(error => console.log('SW registration failed'));
     });
 }
+
