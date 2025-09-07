@@ -1,10 +1,26 @@
 // Configuration
 const CONFIG = {
-    // Replace this with your actual ActivePieces webhook URL
+    // Replace this with your actual webhook URL
     WEBHOOK_URL: 'https://cloud.activepieces.com/api/v1/webhooks/Mv38eBdOp6AP7ctrdOGOP',
     MAX_MESSAGE_LENGTH: 5000,
     TYPING_DELAY: 100,
-    API_TIMEOUT: 30000 // 30 seconds
+    API_TIMEOUT: 30000, // 30 seconds
+    MESSAGES: {
+        THINKING: [
+            'AI is thinking...',
+            'Processing your request...',
+            'Generating response...',
+            'Working on it...',
+            'Almost ready...'
+        ],
+        ERROR: [
+            "I apologize, but I'm having trouble processing your request right now. Please try again in a moment.",
+            "Something went wrong on my end. Could you please try sending your message again?",
+            "I'm experiencing some technical difficulties. Please give me a moment and try again."
+        ],
+        TIMEOUT: "I'm taking longer than usual to respond. Please try again, or check your connection.",
+        NO_RESPONSE: "I received your message and I'm processing it. Thank you for your patience!"
+    }
 };
 
 // DOM Elements
@@ -14,6 +30,13 @@ const chatMessages = document.getElementById('chatMessages');
 const loadingOverlay = document.getElementById('loadingOverlay');
 const charCount = document.querySelector('.char-count');
 const starterCards = document.querySelectorAll('.starter-card');
+const settingsBtn = document.getElementById('settingsBtn');
+const settingsModal = document.getElementById('settingsModal');
+const closeSettingsBtn = document.getElementById('closeSettings');
+const saveSettingsBtn = document.getElementById('saveSettings');
+const resetSettingsBtn = document.getElementById('resetSettings');
+const webhookUrlInput = document.getElementById('webhookUrl');
+const apiTimeoutInput = document.getElementById('apiTimeout');
 
 // State
 let isLoading = false;
@@ -24,6 +47,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeEventListeners();
     updateCharCount();
     showWelcomeMessage();
+    initializeSettings();
 });
 
 // Event Listeners
@@ -65,6 +89,26 @@ function initializeEventListeners() {
             }
         });
     });
+    
+    // Settings modal event listeners
+    settingsBtn.addEventListener('click', openSettings);
+    closeSettingsBtn.addEventListener('click', closeSettings);
+    saveSettingsBtn.addEventListener('click', saveSettings);
+    resetSettingsBtn.addEventListener('click', resetSettings);
+    
+    // Close modal when clicking outside
+    settingsModal.addEventListener('click', function(e) {
+        if (e.target === settingsModal) {
+            closeSettings();
+        }
+    });
+    
+    // Close modal with escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && settingsModal.classList.contains('show')) {
+            closeSettings();
+        }
+    });
 }
 
 // Show welcome message
@@ -91,6 +135,8 @@ async function handleSendMessage() {
         return;
     }
     
+    let typingIndicator = null;
+    
     try {
         // Add user message to chat
         const userMessage = {
@@ -107,27 +153,75 @@ async function handleSendMessage() {
         updateCharCount();
         updateSendButtonState();
         
-        // Show loading state
-        setLoadingState(true);
+        // Show typing indicator instead of full screen loading
+        const typingMessage = {
+            isBot: true,
+            isTyping: true,
+            timestamp: new Date(),
+            thinkingText: getRandomThinkingMessage()
+        };
+        
+        typingIndicator = addMessageToChat(typingMessage);
+        
+        // Update thinking message periodically for long requests
+        const thinkingInterval = setInterval(() => {
+            if (typingIndicator && typingIndicator.parentNode) {
+                const textElement = typingIndicator.querySelector('.typing-text');
+                if (textElement) {
+                    textElement.textContent = getRandomThinkingMessage();
+                }
+            } else {
+                clearInterval(thinkingInterval);
+            }
+        }, 3000);
         
         // Send to webhook
         const response = await sendToWebhook(message);
         
-        // Add bot response to chat
+        // Clear the thinking interval
+        clearInterval(thinkingInterval);
+        
+        // Remove typing indicator
+        if (typingIndicator) {
+            typingIndicator.remove();
+        }
+        
+        // Add bot response to chat with typing animation
         const botMessage = {
-            text: response || "I received your message and I'm processing it. Thank you for your patience!",
+            text: response || CONFIG.MESSAGES.NO_RESPONSE,
             isBot: true,
             timestamp: new Date()
         };
         
-        addMessageToChat(botMessage);
-        messageHistory.push(botMessage);
+        // Add the real response with a slight delay for better UX
+        setTimeout(() => {
+            addMessageToChat(botMessage);
+            messageHistory.push(botMessage);
+        }, 300);
         
     } catch (error) {
         console.error('Error sending message:', error);
         
+        // Clear the thinking interval
+        if (typeof thinkingInterval !== 'undefined') {
+            clearInterval(thinkingInterval);
+        }
+        
+        // Remove typing indicator if there's an error
+        if (typingIndicator) {
+            typingIndicator.remove();
+        }
+        
+        // Determine error message based on error type
+        let errorText;
+        if (error.message.includes('timed out') || error.message.includes('timeout')) {
+            errorText = CONFIG.MESSAGES.TIMEOUT;
+        } else {
+            errorText = getRandomErrorMessage();
+        }
+        
         const errorMessage = {
-            text: "I apologize, but I'm having trouble processing your request right now. Please try again in a moment.",
+            text: errorText,
             isBot: true,
             timestamp: new Date(),
             isError: true
@@ -153,7 +247,7 @@ async function sendToWebhook(message) {
             userAgent: navigator.userAgent
         };
         
-        const response = await fetch(CONFIG.WEBHOOK_URL, {
+        const response = await fetch(getWebhookURL(), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -186,14 +280,29 @@ async function sendToWebhook(message) {
 // Add message to chat interface
 function addMessageToChat(message) {
     const messageElement = document.createElement('div');
-    messageElement.className = `message ${message.isBot ? 'bot' : 'user'}${message.isError ? ' error' : ''}`;
+    messageElement.className = `message ${message.isBot ? 'bot' : 'user'}${message.isError ? ' error' : ''}${message.isTyping ? ' typing' : ''}`;
     
     const timeString = formatTime(message.timestamp);
     
-    messageElement.innerHTML = `
-        <div class="message-text">${escapeHtml(message.text)}</div>
-        <div class="message-time">${timeString}</div>
-    `;
+    if (message.isTyping) {
+        messageElement.innerHTML = `
+            <div class="message-text">
+                <div class="typing-indicator">
+                    <div class="typing-dots">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+                    <span class="typing-text">${message.thinkingText || 'AI is thinking...'}</span>
+                </div>
+            </div>
+        `;
+    } else {
+        messageElement.innerHTML = `
+            <div class="message-text">${escapeHtml(message.text)}</div>
+            <div class="message-time">${timeString}</div>
+        `;
+    }
     
     chatMessages.appendChild(messageElement);
     
@@ -209,6 +318,8 @@ function addMessageToChat(message) {
     if (messageHistory.length === 1) {
         hideConversationStarters();
     }
+    
+    return messageElement;
 }
 
 // Hide conversation starters with animation
@@ -295,6 +406,118 @@ function showError(message) {
     };
     
     addMessageToChat(errorMessage);
+}
+
+// Get random thinking message
+function getRandomThinkingMessage() {
+    const messages = CONFIG.MESSAGES.THINKING;
+    return messages[Math.floor(Math.random() * messages.length)];
+}
+
+// Get random error message
+function getRandomErrorMessage() {
+    const messages = CONFIG.MESSAGES.ERROR;
+    return messages[Math.floor(Math.random() * messages.length)];
+}
+
+// Webhook URL configuration
+function setWebhookURL(url) {
+    if (url && typeof url === 'string') {
+        CONFIG.WEBHOOK_URL = url;
+        localStorage.setItem('chatbot_webhook_url', url);
+    }
+}
+
+function getWebhookURL() {
+    const stored = localStorage.getItem('chatbot_webhook_url');
+    return stored || CONFIG.WEBHOOK_URL;
+}
+
+// Settings Management
+function initializeSettings() {
+    const storedURL = localStorage.getItem('chatbot_webhook_url');
+    const storedTimeout = localStorage.getItem('chatbot_api_timeout');
+    
+    if (storedURL) {
+        CONFIG.WEBHOOK_URL = storedURL;
+    }
+    
+    if (storedTimeout) {
+        CONFIG.API_TIMEOUT = parseInt(storedTimeout) * 1000; // Convert to milliseconds
+    }
+    
+    updateSettingsUI();
+}
+
+function updateSettingsUI() {
+    webhookUrlInput.value = CONFIG.WEBHOOK_URL;
+    apiTimeoutInput.value = CONFIG.API_TIMEOUT / 1000; // Convert to seconds
+}
+
+function openSettings() {
+    updateSettingsUI();
+    settingsModal.classList.add('show');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeSettings() {
+    settingsModal.classList.remove('show');
+    document.body.style.overflow = 'auto';
+}
+
+function saveSettings() {
+    const newWebhookUrl = webhookUrlInput.value.trim();
+    const newTimeout = parseInt(apiTimeoutInput.value);
+    
+    if (!newWebhookUrl) {
+        alert('Please enter a valid webhook URL');
+        return;
+    }
+    
+    if (!newTimeout || newTimeout < 5 || newTimeout > 120) {
+        alert('Please enter a timeout between 5 and 120 seconds');
+        return;
+    }
+    
+    // Save to config and localStorage
+    CONFIG.WEBHOOK_URL = newWebhookUrl;
+    CONFIG.API_TIMEOUT = newTimeout * 1000; // Convert to milliseconds
+    
+    localStorage.setItem('chatbot_webhook_url', newWebhookUrl);
+    localStorage.setItem('chatbot_api_timeout', newTimeout.toString());
+    
+    // Show success message
+    const successMessage = {
+        text: "Settings saved successfully! 🎉",
+        isBot: true,
+        timestamp: new Date()
+    };
+    
+    addMessageToChat(successMessage);
+    closeSettings();
+}
+
+function resetSettings() {
+    if (confirm('Are you sure you want to reset all settings to default?')) {
+        // Clear localStorage
+        localStorage.removeItem('chatbot_webhook_url');
+        localStorage.removeItem('chatbot_api_timeout');
+        
+        // Reset config to defaults
+        CONFIG.WEBHOOK_URL = 'https://cloud.activepieces.com/api/v1/webhooks/Mv38eBdOp6AP7ctrdOGOP';
+        CONFIG.API_TIMEOUT = 30000;
+        
+        updateSettingsUI();
+        
+        const resetMessage = {
+            text: "Settings have been reset to default values.",
+            isBot: true,
+            timestamp: new Date()
+        };
+        
+        addMessageToChat(resetMessage);
+        closeSettings();
+    }
 }
 
 // Keyboard shortcuts
