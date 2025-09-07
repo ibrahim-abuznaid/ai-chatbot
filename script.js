@@ -5,6 +5,7 @@ const CONFIG = {
     MAX_MESSAGE_LENGTH: 5000,
     TYPING_DELAY: 100,
     API_TIMEOUT: 30000, // 30 seconds
+    DEBUG_MODE: true, // Enable debug logging
     MESSAGES: {
         THINKING: [
             'AI is thinking...',
@@ -37,6 +38,8 @@ const saveSettingsBtn = document.getElementById('saveSettings');
 const resetSettingsBtn = document.getElementById('resetSettings');
 const webhookUrlInput = document.getElementById('webhookUrl');
 const apiTimeoutInput = document.getElementById('apiTimeout');
+const testWebhookBtn = document.getElementById('testWebhook');
+const testResult = document.getElementById('testResult');
 
 // State
 let isLoading = false;
@@ -95,6 +98,7 @@ function initializeEventListeners() {
     closeSettingsBtn.addEventListener('click', closeSettings);
     saveSettingsBtn.addEventListener('click', saveSettings);
     resetSettingsBtn.addEventListener('click', resetSettings);
+    testWebhookBtn.addEventListener('click', testWebhookConnection);
     
     // Close modal when clicking outside
     settingsModal.addEventListener('click', function(e) {
@@ -247,6 +251,11 @@ async function sendToWebhook(message) {
             userAgent: navigator.userAgent
         };
         
+        if (CONFIG.DEBUG_MODE) {
+            console.log('Sending webhook request to:', getWebhookURL());
+            console.log('Payload:', payload);
+        }
+        
         const response = await fetch(getWebhookURL(), {
             method: 'POST',
             headers: {
@@ -259,18 +268,60 @@ async function sendToWebhook(message) {
         
         clearTimeout(timeoutId);
         
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+        if (CONFIG.DEBUG_MODE) {
+            console.log('Webhook response status:', response.status);
+            console.log('Webhook response headers:', Object.fromEntries(response.headers.entries()));
         }
         
-        const data = await response.json();
-        return data.response || data.message || "Thank you for your message!";
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Webhook error response:', errorText);
+            throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
+        }
+        
+        const responseText = await response.text();
+        
+        if (CONFIG.DEBUG_MODE) {
+            console.log('Raw webhook response:', responseText);
+        }
+        
+        let data;
+        try {
+            data = JSON.parse(responseText);
+            if (CONFIG.DEBUG_MODE) {
+                console.log('Parsed webhook response:', data);
+            }
+        } catch (parseError) {
+            console.error('Failed to parse JSON response:', parseError);
+            // If it's not JSON, treat the entire response as the message
+            return responseText || CONFIG.MESSAGES.NO_RESPONSE;
+        }
+        
+        // More flexible response parsing
+        const botResponse = data.response || data.message || data.reply || data.text || data.content;
+        
+        if (!botResponse) {
+            console.warn('No valid response field found in webhook response:', data);
+            if (CONFIG.DEBUG_MODE) {
+                console.log('Available response fields:', Object.keys(data));
+            }
+            return CONFIG.MESSAGES.NO_RESPONSE;
+        }
+        
+        return botResponse;
         
     } catch (error) {
         clearTimeout(timeoutId);
         
+        console.error('Webhook request failed:', error);
+        
         if (error.name === 'AbortError') {
             throw new Error('Request timed out. Please try again.');
+        }
+        
+        // Check for CORS issues
+        if (error.message.includes('CORS') || error.message.includes('cross-origin')) {
+            throw new Error('CORS error: Your webhook needs to allow requests from GitHub Pages. Please configure CORS headers on your webhook endpoint.');
         }
         
         throw error;
@@ -517,6 +568,87 @@ function resetSettings() {
         
         addMessageToChat(resetMessage);
         closeSettings();
+    }
+}
+
+// Test webhook connection
+async function testWebhookConnection() {
+    const webhookUrl = webhookUrlInput.value.trim();
+    
+    if (!webhookUrl) {
+        showTestResult('Please enter a webhook URL first', 'error');
+        return;
+    }
+    
+    testWebhookBtn.disabled = true;
+    testWebhookBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing...';
+    showTestResult('Testing webhook connection...', 'loading');
+    
+    try {
+        const testPayload = {
+            message: "Test message from AI chatbot",
+            timestamp: new Date().toISOString(),
+            sessionId: getSessionId(),
+            userAgent: navigator.userAgent,
+            isTest: true
+        };
+        
+        const response = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            body: JSON.stringify(testPayload),
+            signal: AbortSignal.timeout(10000) // 10 second timeout for test
+        });
+        
+        const responseText = await response.text();
+        
+        if (response.ok) {
+            let data;
+            try {
+                data = JSON.parse(responseText);
+            } catch {
+                data = { message: responseText };
+            }
+            
+            const botResponse = data.response || data.message || data.reply || data.text || data.content;
+            
+            if (botResponse) {
+                showTestResult(`✅ Success! Received response: "${botResponse}"`, 'success');
+            } else {
+                showTestResult(`⚠️ Connection successful but no valid response field found. Available fields: ${Object.keys(data).join(', ')}`, 'error');
+            }
+        } else {
+            showTestResult(`❌ HTTP Error ${response.status}: ${responseText}`, 'error');
+        }
+        
+    } catch (error) {
+        console.error('Webhook test failed:', error);
+        
+        if (error.name === 'TimeoutError') {
+            showTestResult('❌ Request timed out. Your webhook may be too slow or unreachable.', 'error');
+        } else if (error.message.includes('CORS') || error.message.includes('cross-origin')) {
+            showTestResult('❌ CORS Error: Your webhook needs to allow requests from GitHub Pages. Add CORS headers: Access-Control-Allow-Origin: *', 'error');
+        } else {
+            showTestResult(`❌ Error: ${error.message}`, 'error');
+        }
+    } finally {
+        testWebhookBtn.disabled = false;
+        testWebhookBtn.innerHTML = '<i class="fas fa-vial"></i> Test';
+    }
+}
+
+function showTestResult(message, type) {
+    testResult.className = `test-result ${type}`;
+    testResult.textContent = message;
+    
+    // Auto-hide success messages after 5 seconds
+    if (type === 'success') {
+        setTimeout(() => {
+            testResult.style.display = 'none';
+        }, 5000);
     }
 }
 

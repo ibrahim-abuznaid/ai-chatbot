@@ -117,13 +117,19 @@
                 <div class="settings-body">
                     <div class="setting-group">
                         <label for="webhookUrl">Webhook URL:</label>
-                        <input 
-                            type="url" 
-                            id="webhookUrl" 
-                            placeholder="Enter your webhook URL..." 
-                            class="settings-input"
-                        >
+                        <div class="input-with-button">
+                            <input 
+                                type="url" 
+                                id="webhookUrl" 
+                                placeholder="Enter your webhook URL..." 
+                                class="settings-input"
+                            >
+                            <button type="button" id="testWebhook" class="test-btn">
+                                <i class="fas fa-vial"></i> Test
+                            </button>
+                        </div>
                         <small class="setting-help">Configure the endpoint where messages will be sent</small>
+                        <div id="testResult" class="test-result"></div>
                     </div>
                     <div class="setting-group">
                         <label for="apiTimeout">Request Timeout (seconds):</label>
