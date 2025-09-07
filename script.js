@@ -1,7 +1,7 @@
 // Configuration
 const CONFIG = {
     // Replace this with your actual webhook URL
-    WEBHOOK_URL: 'https://cloud.activepieces.com/api/v1/webhooks/Mv38eBdOp6AP7ctrdOGOP',
+    WEBHOOK_URL: 'https://cloud.activepieces.com/api/v1/webhooks/Mv38eBdOp6AP7ctrdOGOP/sync',
     MAX_MESSAGE_LENGTH: 5000,
     TYPING_DELAY: 100,
     API_TIMEOUT: 30000, // 30 seconds
